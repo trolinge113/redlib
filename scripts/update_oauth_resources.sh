@@ -39,25 +39,28 @@ done
 echo "];" >> "$filename"
 
 # Fetch Android app versions
-page_1=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions/" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g')
+page_1=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions/" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g' | tr -d '\r')
 # Append with pages
-page_2=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=2" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g')
-page_3=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=3" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g')
-page_4=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=4" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g')
-page_5=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=5" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g')
+page_2=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=2" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g' | tr -d '\r')
+page_3=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=3" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g' | tr -d '\r')
+page_4=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=4" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g' | tr -d '\r')
+page_5=$(curl -s "https://apkcombo.com/reddit/com.reddit.frontpage/old-versions?page=5" | rg "<a class=\"ver-item\" href=\"(/reddit/com\.reddit\.frontpage/download/phone-20\d{2}\.\d+\.\d+-apk)\" rel=\"nofollow\">" -r "https://apkcombo.com\$1" | sort | uniq | sed 's/      //g' | tr -d '\r')
 
-# Concatenate all pages
-versions="${page_1}"
-versions+=$'\n'
-versions+="${page_2}"
-versions+=$'\n'
-versions+="${page_3}"
-versions+=$'\n'
-versions+="${page_4}"
-versions+=$'\n'
-versions+="${page_5}"
+# Concatenate all pages cleanly
+# (Using inline subshells ensures that empty responses won't leave dangling newlines)
+versions=$(cat <<EOF
+${page_1}
+${page_2}
+${page_3}
+${page_4}
+${page_5}
+EOF
+)
 
-# Count the number of lines in the version list
+# FIX: Remove any purely empty or whitespace-only lines before executing the count
+versions=$(echo "$versions" | grep -v '^$')
+
+# Count the actual populated entries dynamically
 android_count=$(echo "$versions" | wc -l)
 
 echo -e "Fetching \e[32m$android_count Android app versions...\e[0m"
@@ -68,14 +71,30 @@ echo "pub const ANDROID_APP_VERSION_LIST: &[&str; $android_count] = &[" >> "$fil
 num=0
 
 # For each in versions, curl the page and extract the build number
-echo "$versions" | while IFS= read -r line; do
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+
+  # FIX: Strip out invisible trailing carriage returns (\r) from the URL string
+  # line=$(echo "$line" | tr -d '\r')
+
   num=$((num+1))
+
+  # Fetching using regular curl behavior (no subshell hijack)
   fetch_page=$(curl -s "$line")
-  build=$(echo "$fetch_page" | rg "<span class=\"vercode\">\((\d+)\)</span>" --only-matching -r "\$1" | head -n1)
-  version=$(echo "$fetch_page" | rg "<span class=\"vername\">Reddit (20\d{2}\.\d+\.\d+)</span>" --only-matching -r "\$1" | head -n1)
-  echo "	\"Version $version/Build $build\"," >> "$filename"
+
+  build=$(echo "$fetch_page" | rg '<span class="vercode">\((\d+)\)</span>' --only-matching -r '$1' | head -n1)
+  version=$(echo "$fetch_page" | rg '<span class="vername">Reddit (20\d{2}\.\d+\.\d+)</span>' --only-matching -r '$1' | head -n1)
+
+  # Check if empty
+  if [[ -z "$build" || -z "$version" ]]; then
+    echo -e "⚠️ [\e[31mError\e[0m] Regex failed to parse content on: $line"
+    continue
+  fi
+
+  echo "Build $build Version $version"
+  echo "  \"Version $version/Build $build\"," >> "$filename"
   echo -e "[$num/$android_count] Fetched \e[32mVersion $version/Build $build\e[0m."
-done
+done <<< "$versions"
 
 # Close the array in the source file
 echo "];" >> "$filename"

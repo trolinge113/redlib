@@ -3,6 +3,7 @@ name: Pull Request
 env:
   CARGO_TERM_COLOR: always
   NEXTEST_RETRIES: 10
+  RUST_BACKTRACE: 1
 
 on:
   push:
@@ -15,7 +16,7 @@ on:
     
 jobs:
   test:
-    name: cargo test
+    name: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -30,10 +31,10 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Run cargo nextest
-        run: cargo nextest run
+        run: cargo nextest run --no-capture --no-fail-fast
 
   format:
-    name: cargo fmt --all -- --check
+    name: format
     runs-on: ubuntu-latest
 
     steps:
@@ -50,7 +51,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    name: cargo clippy -- -D warnings
+    name: clippy
     runs-on: ubuntu-latest
 
     steps:

@@ -370,16 +370,11 @@ impl OauthBackend for GenericWebAuth {
 		trace!("Received response with status {} and length {:?}", resp.status(), resp.headers().get("content-length"));
 		trace!("GenericWebAuth headers: {:#?}", resp.headers());
 
-		// Parse headers - loid header _should_ be saved sent on subsequent token refreshes.
-		// Technically it's not needed, but it's easy for Reddit API to check for this.
-		// It's some kind of header that uniquely identifies the device.
-		// Not worried about the privacy implications, since this is randomly changed
-		// and really only as privacy-concerning as the OAuth token itself.
+		// Parse headers
 		if let Some(header) = resp.headers().get("x-reddit-loid") {
 			self.additional_headers.insert("x-reddit-loid".to_owned(), header.to_str().unwrap().to_string());
 		}
 
-		// Same with x-reddit-session
 		if let Some(header) = resp.headers().get("x-reddit-session") {
 			self.additional_headers.insert("x-reddit-session".to_owned(), header.to_str().unwrap().to_string());
 		}
@@ -390,7 +385,7 @@ impl OauthBackend for GenericWebAuth {
 		let body_bytes = hyper::body::to_bytes(resp.into_body()).await?;
 		let json: serde_json::Value = serde_json::from_slice(&body_bytes).map_err(AuthError::SerdeDeserialize)?;
 
-		trace!("Accessing relevant fields...");
+		trace!("Accessing relevant fields... Response body: {:?}", json);
 
 		// Parse response - access_token, token_type, device_id, expires_in, scope
 		let token = json
@@ -405,11 +400,9 @@ impl OauthBackend for GenericWebAuth {
 			.as_u64()
 			.ok_or_else(|| AuthError::Field((json.clone(), "expires_in: as_u64")))?;
 
-		info!(
-			"[✅] GenericWebAuth success - Retrieved token \"{}...\", expires in {}",
-			&token[..32.min(token.len())],
-			expires_in
-		);
+		// FIX: Use .chars().take() instead of byte-slicing to avoid UTF-8 boundary panics
+		let truncated_token: String = token.chars().take(32).collect();
+		info!("[✅] GenericWebAuth success - Retrieved token \"{}...\", expires in {}", truncated_token, expires_in);
 
 		// Insert a few necessary headers
 		self.additional_headers.insert("Origin".to_owned(), "https://www.reddit.com".to_owned());
@@ -497,7 +490,19 @@ async fn test_generic_web_backend() {
 	// Test GenericWebAuth backend specifically
 	let mut backend = GenericWebAuth::new();
 	let response = backend.authenticate().await;
-	assert!(response.is_ok());
+
+	// If it fails, print the actual error before panicking!
+	if let Err(ref e) = response {
+		println!("\n⛔ [TEST FAILED] authenticate() returned an error:");
+		match e {
+			AuthError::Hyper(hyper_err) => println!("-> Hyper network/protocol error: {:?}", hyper_err),
+			AuthError::SerdeDeserialize(json_err) => println!("-> JSON Deserialization error: {:?}", json_err),
+			AuthError::Field((json_body, field_msg)) => println!("-> API returned valid JSON but missing field '{}'. \nFull Body: {}", field_msg, json_body),
+		}
+		println!();
+	}
+
+	assert!(response.is_ok(), "Backend authentication failed. See details printed above.");
 	let response = response.unwrap();
 	assert!(!response.token.is_empty());
 	assert!(response.expires_in > 0);
