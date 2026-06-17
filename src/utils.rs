@@ -5,6 +5,7 @@ use crate::config::{self, get_setting};
 //
 // CRATES
 //
+use crate::redgifs;
 use crate::{client::json, server::RequestExt};
 use askama::Template;
 use cookie::Cookie;
@@ -13,7 +14,6 @@ use libflate::deflate::{Decoder, Encoder};
 use log::error;
 use regex::Regex;
 use revision::revisioned;
-use crate::redgifs;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
