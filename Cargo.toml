@@ -62,7 +62,7 @@ base2048 = "2.0.2"
 revision = "0.10.0"
 fake_user_agent = "0.2.2"
 rustls = "0.21.12"
-hyper-rustls = ">=0.27"
+hyper-rustls = "0.24"
 
 [dev-dependencies]
 lipsum = "0.9.0"
