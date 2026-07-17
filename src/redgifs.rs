@@ -1,6 +1,7 @@
 use hyper::{Body, Request, Response};
 use serde_json::Value;
 use std::sync::LazyLock;
+use url::Url;
 
 use crate::client::{proxy, CLIENT};
 use crate::server::RequestExt;
@@ -17,19 +18,37 @@ pub async fn handler(req: Request<Body>) -> Result<Response<Body>, String> {
 	let path = req.param("path").unwrap_or_default();
 
 	if path.ends_with(".mp4") {
-		return proxy(req, &format!("https://media.redgifs.com/{}", path)).await;
+		let (host, media_path) = if let Some((candidate_host, remainder)) = path.split_once('/') {
+			if candidate_host.ends_with(".redgifs.com") {
+				(candidate_host.to_string(), remainder.to_string())
+			} else {
+				("media.redgifs.com".to_string(), path.clone())
+			}
+		} else {
+			("media.redgifs.com".to_string(), path.clone())
+		};
+
+		return proxy(req, &format!("https://{host}/{media_path}")).await;
 	}
 
 	match fetch_video_url(&format!("https://www.redgifs.com/watch/{}", path)).await.ok() {
 		Some(video_url) => {
-			let filename = video_url.strip_prefix("https://media.redgifs.com/").unwrap_or(&video_url);
-			Ok(
-				Response::builder()
-					.status(302)
-					.header("Location", format!("/redgifs/{}", filename))
-					.body(Body::empty())
-					.unwrap_or_default(),
-			)
+			let parsed = Url::parse(&video_url).map_err(|e| e.to_string())?;
+			let Some(host) = parsed.host_str() else {
+				return Ok(Response::builder().status(404).body("RedGifs video not found".into()).unwrap_or_default());
+			};
+
+			if !host.ends_with(".redgifs.com") {
+				return Ok(Response::builder().status(404).body("RedGifs video not found".into()).unwrap_or_default());
+			}
+
+			let media_path = parsed.path().trim_start_matches('/');
+			let location = parsed.query().map_or_else(
+				|| format!("/redgifs/{host}/{media_path}"),
+				|q| format!("/redgifs/{host}/{media_path}?{q}"),
+			);
+
+			Ok(Response::builder().status(302).header("Location", location).body(Body::empty()).unwrap_or_default())
 		}
 		None => Ok(Response::builder().status(404).body("RedGifs video not found".into()).unwrap_or_default()),
 	}
